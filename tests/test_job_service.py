@@ -18,9 +18,7 @@ from core.models import (
     Job,
     now_iso,
 )
-from repositories.base import empty_document
 from repositories.local_json import LocalJsonRepository
-from repositories.mirror import MirrorRepository
 from services.job_service import JobError, JobService
 from services.parser_notas import count_sections, parse
 
@@ -220,44 +218,6 @@ def test_migration_from_v1_plain_list(tmp_path):
     service = JobService(repo)
     assert service.list_jobs()[0].client == "Cliente V1"
     assert service.list_notes() == []
-
-
-# ---------------------------------------------------------------------------
-# Espejo (Drive)
-# ---------------------------------------------------------------------------
-def test_mirror_restores_from_mirror_when_local_empty(tmp_path):
-    local = LocalJsonRepository(str(tmp_path / "local.json"))
-    mirror = LocalJsonRepository(str(tmp_path / "drive.json"))
-
-    # El "Drive" ya tiene datos.
-    doc = empty_document()
-    doc["jobs"] = [{"id": "abc", "client": "Desde Drive", "created_at": "2024-01-01T00:00:00"}]
-    mirror.save_document(doc)
-
-    repo = MirrorRepository(primary=local, mirror=mirror)
-    service = JobService(repo)
-    assert service.list_jobs()[0].client == "Desde Drive"
-
-
-def test_mirror_saves_to_both_and_tracks_error(tmp_path):
-    local = LocalJsonRepository(str(tmp_path / "local.json"))
-    mirror = MirrorRepository(primary=local, mirror=None)
-    service = JobService(mirror)
-    service.create_job("Cliente E", TYPE_POR_HORA, hourly_rate=10, hours_invested=2)
-    assert mirror.last_error is None
-
-    # Con espejo que falla, el guardado local no se rompe y se registra el error.
-    mirror.attach_mirror(MyFailingRepo())
-    service.create_job("Cliente F", TYPE_POR_SERVICIO, fixed_price=1)
-    assert mirror.last_error and "Sin conexión" in mirror.last_error
-
-
-class MyFailingRepo:
-    def load_document(self):
-        return empty_document()
-
-    def save_document(self, document):
-        raise RuntimeError("Sin conexión")
 
 
 # ---------------------------------------------------------------------------

@@ -2,8 +2,8 @@
 
 El almacenamiento es un *documento* JSON versionado (``{"schema_version",
 "jobs": [...], "notes": [...]}``) para que los datos sean universales y se
-puedan migrar sin pérdida. La interfaz es agnóstica: JSON local, Google Drive,
-base relacional, etc., solo requieren una clase concreta.
+puedan migrar sin pérdida. La interfaz es agnóstica: JSON local, base
+relacional, etc., solo requieren una clase concreta.
 """
 
 from __future__ import annotations

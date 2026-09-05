@@ -1,9 +1,8 @@
 # Secretos (nunca versionar)
 .streamlit/secrets.toml
 
-# Datos y credenciales en tiempo de ejecución
+# Datos en tiempo de ejecución
 .data/
-.credentials/
 
 # Apuntes personales ajenos a la app
 oddo_pruebas.txt

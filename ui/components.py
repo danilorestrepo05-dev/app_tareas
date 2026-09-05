@@ -702,52 +702,19 @@ def render_notes_tab() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Respaldo
+# Respaldo / exportación
 # ---------------------------------------------------------------------------
-def render_backup_panel(email: str) -> None:
-    from auth import auth as auth_mod
-
-    st.subheader("☁️ Respaldo en Google Drive")
-    repo = getattr(service.repo, "mirror", None)
-    linked = repo is not None
-
-    if not auth_mod._drive_config():
-        st.info(
-            "El respaldo en Drive no está configurado (falta `[drive_oauth]` en "
-            "`secrets.toml`). Sin él los datos solo viven en el archivo local."
-        )
-    elif not linked:
-        st.markdown(
-            "Conecta tu Google Drive para que **cada cambio se respalde** en la "
-            "carpeta oculta de la app. Así, si pierdes o dañas el teléfono, "
-            "podrás volver a acceder a todo desde otro dispositivo."
-        )
-        auth_url = auth_mod.start_drive_auth(email)
-        if auth_url:
-            st.link_button("🔗 Conectar Google Drive", auth_url, type="primary")
-        st.caption("Solo se pide acceso a la carpeta `appDataFolder` (scope `drive.file`).")
-        error = st.session_state.get("_drive_oauth_error")
-        if error:
-            st.error(f"Error conectando Drive: {error}")
-    else:
-        c1, c2 = st.columns(2)
-        c1.success("Respaldo en Drive conectado.")
-        if c2.button("🔄 Sincronizar ahora"):
-            err = service.sync_mirror()
-            if err:
-                st.error(err)
-            else:
-                st.toast("Datos sincronizados con Drive.")
-                st.rerun()
-
-    last_error = getattr(service.repo, "last_error", None)
-    if last_error:
-        st.warning(last_error)
-
+def render_backup_panel() -> None:
+    st.subheader("📦 Respaldo y exportación")
+    st.markdown(
+        "Tus datos viven en la nube (Streamlit Community Cloud), en un archivo "
+        "propio por usuario: sobreviven a la pérdida o deterioro del teléfono. "
+        "Usa las descargas para copiarlos o llevarlos a otro lugar."
+    )
     st.divider()
     st.subheader("⬇️ Exportar datos")
     try:
-        doc = service.repo.primary.load_document()
+        doc = service.repo.load_document()
         json_payload = json.dumps(doc, ensure_ascii=False, indent=2).encode("utf-8")
     except Exception:
         json_payload = b"{}"
@@ -766,10 +733,3 @@ def render_backup_panel(email: str) -> None:
         mime="text/csv",
     )
     st.caption("JSON: copia completa del documento (universal). CSV: formato de hoja de cálculo.")
-
-    if linked:
-        st.divider()
-        if st.button("🔌 Desconectar Drive"):
-            auth_mod.unlink_drive(email)
-            st.toast("Drive desconectado. Los datos locales se conservan.")
-            st.rerun()

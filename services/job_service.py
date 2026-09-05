@@ -2,8 +2,8 @@
 gestiona el historial, el bloc de notas global, la agrupación por empresa,
 los recordatorios y la exportación CSV.
 
-La capa solo conoce ``BaseRepository``; no importa JSON real, ni Drive, ni
-archivos. Toda escritura sale por aquí a través del repositorio.
+La capa solo conoce ``BaseRepository``; no importa JSON real ni archivos.
+Toda escritura sale por aquí a través del repositorio.
 """
 
 from __future__ import annotations
@@ -62,11 +62,6 @@ class JobService:
 
     def _persist(self) -> None:
         self.repo.save_document(self._document())
-
-    def sync_mirror(self) -> Optional[str]:
-        """Fuerza push al respaldo (Drive). Devuelve el error si lo hay."""
-        self._persist()
-        return getattr(self.repo, "last_error", None)
 
     # -- Trabajos: consultas -------------------------------------------------
     def list_jobs(

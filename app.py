@@ -18,7 +18,6 @@ st.set_page_config(
 
 from auth import auth as auth_mod
 from repositories.local_json import LocalJsonRepository
-from repositories.mirror import MirrorRepository
 from services.job_service import JobService
 from ui import components as cmp
 from ui.styles import apply_styles
@@ -30,8 +29,7 @@ _LOGO_SVG = (Path(__file__).resolve().parent / "assets" / "icon.svg").read_text(
 def build_service(email: str) -> JobService:
     """Clave de caché por email: cada usuario lee/escribe solo su archivo."""
     path = auth_mod.data_path_for(email)
-    primary = LocalJsonRepository(path)
-    return JobService(MirrorRepository(primary))
+    return JobService(LocalJsonRepository(path))
 
 
 def main() -> None:
@@ -40,16 +38,7 @@ def main() -> None:
     user = auth_mod.require_login()
     email = user["email"]
 
-    if auth_mod.complete_drive_auth():
-        st.rerun()
-
     service = build_service(email)
-
-    # Conectar el respaldo de Drive (best-effort; nunca rompe la app).
-    prev_error = getattr(service.repo, "last_error", None)
-    service.repo.attach_mirror(auth_mod.get_drive_repository(email))
-    if prev_error and not getattr(service.repo, "last_error", None):
-        service.repo.last_error = prev_error
 
     # Ancla de destino para el botón "volver arriba".
     st.markdown('<span id="nc-top"></span>', unsafe_allow_html=True)
@@ -61,7 +50,7 @@ def main() -> None:
             f'<div class="app-header">'
             f'<span class="app-logo">{_LOGO_SVG}</span>'
             f'<span class="app-brand">NotesControl</span>'
-            '<div class="app-caption">Estados, horas, cobros y notas · con respaldo en tu Google Drive.</div>'
+            '<div class="app-caption">Estados, horas, cobros y notas · tus datos guardados en la nube.</div>'
             "</div>",
             unsafe_allow_html=True,
         )
@@ -75,9 +64,6 @@ def main() -> None:
         )
         if st.button("Salir", key="btn_logout", type="secondary", use_container_width=True):
             auth_mod.logout()
-
-    if getattr(service.repo, "last_error", None):
-        st.warning(service.repo.last_error)
 
     cmp.bind_service(service)
 
@@ -116,7 +102,7 @@ def main() -> None:
     elif page == "Historial":
         cmp.render_history_tab()
     else:
-        cmp.render_backup_panel(email)
+        cmp.render_backup_panel()
 
     cmp.render_back_to_top(start_at_top=st.session_state.pop("_scroll_to_top", False))
 

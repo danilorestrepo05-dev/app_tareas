@@ -1,87 +1,16 @@
-"""Autenticación de identidad (``st.login("google")``) y autorización del
-respaldo en Google Drive (scope ``drive.file``).
+"""Autenticación de identidad con ``st.login("google")``.
 
-GOTCHA crítico: el login da identidad, pero NO acceso al Drive. El respaldo
-usa un OAuth 2.0 propio (secrets ``[drive_oauth]``) que pide el scope de Drive
-y guarda el token por usuario. Si no hay credenciales configuradas, la app cae
-a un "modo desarrollo" local para poder ejecutarse sin Google.
+El email de sesión es la clave de partición de datos: cada usuario lee y
+escribe solo su propio archivo. Si no hay credenciales en ``secrets.toml``,
+la app cae a un "modo desarrollo" local para poder ejecutarse sin Google.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-import time
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from repositories.drive import (
-    DRIVE_SCOPE,
-    DriveNotAvailableError,
-    DriveRepository,
-    build_service,
-)
-from core.models import now_iso
-
-CRED_DIR = ".credentials"
 DEV_USER_KEY = "_dev_user"
-PENDING_PREFIX = "pending_oauth_"
-PENDING_MAX_AGE_MINUTES = 10
-
-
-def _resolve_cred_dir(base_dir: Optional[str]) -> str:
-    return base_dir or CRED_DIR
-
-
-def _pending_path(state: str, base_dir: Optional[str] = None) -> str:
-    safe = hashlib.sha1(state.encode("utf-8")).hexdigest()
-    return os.path.join(_resolve_cred_dir(base_dir), f"{PENDING_PREFIX}{safe}.json")
-
-
-def _save_pending(state: str, payload: dict, base_dir: Optional[str] = None) -> None:
-    os.makedirs(_resolve_cred_dir(base_dir), exist_ok=True)
-    with open(_pending_path(state, base_dir), "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
-
-
-def _load_pending(state: str, base_dir: Optional[str] = None) -> Optional[dict]:
-    path = _pending_path(state, base_dir)
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            data = json.load(fh)
-            return data if isinstance(data, dict) else None
-    except (ValueError, OSError):
-        return None
-
-
-def _clear_pending(state: str, base_dir: Optional[str] = None) -> None:
-    try:
-        os.remove(_pending_path(state, base_dir))
-    except OSError:
-        pass
-
-
-def _sweep_pending(
-    base_dir: Optional[str] = None, max_age_minutes: int = PENDING_MAX_AGE_MINUTES
-) -> None:
-    """Borra flujos OAuth de Drive caducados que quedaron sin completar."""
-    try:
-        entries = os.listdir(_resolve_cred_dir(base_dir))
-    except OSError:
-        return
-    cutoff = time.time() - max_age_minutes * 60
-    for name in entries:
-        if not name.startswith(PENDING_PREFIX):
-            continue
-        path = os.path.join(_resolve_cred_dir(base_dir), name)
-        try:
-            if os.path.getmtime(path) < cutoff:
-                os.remove(path)
-        except OSError:
-            pass
 
 try:
     _LOGO_SVG = (
@@ -89,11 +18,6 @@ try:
     ).read_text(encoding="utf-8")
 except OSError:  # pragma: no cover - el logo vuela junto con el repo
     _LOGO_SVG = ""
-
-
-def _user_cred_path(email: str) -> str:
-    safe = hashlib.sha1(email.strip().lower().encode("utf-8")).hexdigest()
-    return os.path.join(CRED_DIR, f"{safe}.json")
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +64,7 @@ def _render_login_screen(provider: bool, st) -> None:
                 f'<div class="login-logo">{_LOGO_SVG}</div>'
                 '<div class="login-title">NotesControl</div>'
                 '<div class="login-sub">Tus trabajos freelance: estados, horas, cobros y notas,'
-                " siempre a mano y respaldados en tu Google Drive.</div>"
+                " siempre a mano y guardados en la nube.</div>"
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -190,199 +114,3 @@ def data_path_for(email: str) -> str:
     uid = session_user_id(email)
     root = os.environ.get("APP_DATA_ROOT", ".data")
     return os.path.join(root, uid, "trabajos.json")
-
-
-# ---------------------------------------------------------------------------
-# Respaldo en Drive (scope drive.file) - OAuth 2.0 propio
-# ---------------------------------------------------------------------------
-@dataclass
-class DriveStatus:
-    linked: bool = False
-    needs_setup: bool = False
-    auth_url: Optional[str] = None
-    error: Optional[str] = None
-    last_sync_error: Optional[str] = field(default=None)
-
-
-def _drive_config() -> dict:
-    import streamlit as st
-
-    try:
-        return dict(st.secrets.get("drive_oauth") or {})
-    except Exception:
-        return {}
-
-
-def _build_flow(redirect_uri: str):
-    from google_auth_oauthlib.flow import Flow
-
-    cfg = _drive_config()
-    client_config = {
-        "web": {
-            "client_id": cfg["client_id"],
-            "client_secret": cfg["client_secret"],
-            "auth_uri": cfg.get("auth_uri", "https://accounts.google.com/o/oauth2/auth"),
-            "token_uri": cfg.get("token_uri", "https://oauth2.googleapis.com/token"),
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "redirect_uris": [redirect_uri],
-        }
-    }
-    flow = Flow.from_client_config(client_config, scopes=[DRIVE_SCOPE])
-    flow.redirect_uri = redirect_uri
-    return flow
-
-
-def drive_redirect_uri() -> str:
-    cfg = _drive_config()
-    configured = (cfg.get("redirect_uri") or "").strip()
-    # En Community Cloud el placeholder "TOKEN.env.app.streamlit.app" se
-    # sustituye para la sección [auth], pero no en secciones propias como
-    # [drive_oauth]: si quedó sin reemplazar (o vacío), derivamos la URL
-    # base real del hostname que Streamlit Cloud expone como variable de
-    # entorno HOSTNAME.
-    if "TOKEN.env.app" in configured:
-        configured = ""
-    host = (os.environ.get("HOSTNAME") or "").strip()
-    if not configured and host and "." in host and host.lower() != "localhost":
-        return f"https://{host}"
-    return configured or "http://localhost:8501"
-
-
-def start_drive_auth(email: str) -> Optional[str]:
-    """Genera la URL de autorización de Drive. Devuelve None si falta config.
-
-    El estado se persiste en disco (`.credentials/pending_oauth_*.json`) además
-    de en `session_state`: la redirección de Google es una navegación completa
-    y en Community Cloud la sesión de Streamlit puede no restaurarse, así que
-    ``complete_drive_auth`` lee el pendiente desde el archivo (con expiración).
-    """
-    import streamlit as st
-
-    if not _drive_config():
-        return None
-    if not email:
-        return None
-    try:
-        _sweep_pending()
-        redirect_uri = drive_redirect_uri()
-        flow = _build_flow(redirect_uri)
-        auth_url, state = flow.authorization_url(
-            access_type="offline", prompt="consent", include_granted_scopes="true"
-        )
-        payload = {
-            "email": email,
-            "state": state,
-            "redirect_uri": redirect_uri,
-            "ts": now_iso(),
-        }
-        st.session_state["_drive_oauth"] = payload
-        _save_pending(state, payload)
-        return auth_url
-    except Exception as exc:  # pragma: no cover
-        st.session_state["_drive_oauth_error"] = str(exc)
-        return None
-
-
-def _query_value(params, key: str) -> str:
-    value = params.get(key)
-    if isinstance(value, list):
-        return str(value[0]) if value else ""
-    return str(value or "")
-
-
-def complete_drive_auth() -> bool:
-    """Intercambia el `code` del redirect por un token y lo guarda por usuario."""
-    import streamlit as st
-
-    params = st.query_params
-    if "code" not in params:
-        return False
-    state = _query_value(params, "state")
-
-    saved = _load_pending(state) if state else None
-    if saved is None:
-        saved = st.session_state.get("_drive_oauth")
-    if not saved:
-        st.session_state["_drive_oauth_error"] = (
-            "No se encontró el flujo de Drive que empezaste (si la app se reinició "
-            "entre la autorización y el retorno, el pendiente se pierde). "
-            "Vuelve a pulsar «Conectar Google Drive»."
-        )
-        return False
-    if state and str(saved.get("state")) != state:
-        st.session_state["_drive_oauth_error"] = "Estado OAuth no válido."
-        return False
-    try:
-        redirect_uri = saved["redirect_uri"]
-        callback = (
-            f"{redirect_uri}?code={_query_value(params, 'code')}&state={state or str(saved.get('state') or '')}"
-        )
-        flow = _build_flow(redirect_uri)
-        flow.fetch_token(authorization_response=callback)
-        email = saved.get("email") or ""
-        if not email:
-            raise ValueError("Falta el email del flujo OAuth de Drive.")
-        _save_token(email, flow.credentials)
-        if state:
-            _clear_pending(state)
-        st.session_state.pop("_drive_oauth", None)
-        st.session_state.pop("_drive_oauth_error", None)
-        for key in list(params.keys()):
-            if key in ("code", "scope", "authuser", "prompt", "state"):
-                del st.query_params[key]
-        return True
-    except Exception as exc:  # pragma: no cover
-        if state:
-            _clear_pending(state)
-        st.session_state["_drive_oauth_error"] = str(exc)
-        return False
-
-
-def _save_token(email: str, credentials) -> None:
-    os.makedirs(CRED_DIR, exist_ok=True)
-    with open(_user_cred_path(email), "w", encoding="utf-8") as fh:
-        fh.write(credentials.to_json())
-
-
-def _load_token(email: str):
-    path = _user_cred_path(email)
-    if not os.path.exists(path):
-        return None
-    try:
-        from google.oauth2.credentials import Credentials
-
-        with open(path, "r", encoding="utf-8") as fh:
-            return Credentials.from_authorized_user_info(json.load(fh), scopes=[DRIVE_SCOPE])
-    except Exception:
-        return None
-
-
-def _refresh_if_needed(email: str, credentials) -> "credentials":
-    from google.auth.transport.requests import Request
-
-    if credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-        _save_token(email, credentials)
-    return credentials
-
-
-def get_drive_repository(email: str) -> Optional[DriveRepository]:
-    """Devuelve un repositorio Drive listo, o None si no hay token/conexión."""
-    creds = _load_token(email)
-    if creds is None:
-        return None
-    try:
-        creds = _refresh_if_needed(email, creds)
-        service = build_service(creds)
-        return DriveRepository(service)
-    except Exception:
-        return None
-
-
-def unlink_drive(email: str) -> None:
-    path = _user_cred_path(email)
-    try:
-        if os.path.exists(path):
-            os.remove(path)
-    except OSError:
-        pass

@@ -1,7 +1,7 @@
 """Modelos de dominio y máquina de estados del registro de trabajos.
 
 La lógica de negocio vive aquí y en ``services``; nunca conoce la capa física
-(JSON local / Drive), que queda encapsulada en ``repositories``.
+(JSON local), que queda encapsulada en ``repositories``.
 """
 
 from __future__ import annotations
