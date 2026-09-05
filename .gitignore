@@ -8,6 +8,12 @@
 # Apuntes personales ajenos a la app
 oddo_pruebas.txt
 
+# Documentación y config locales del agente (no se versiona)
+CHANGELOG.md
+AGENTS.md
+SKILLS.md
+opencode.json
+
 # Python
 __pycache__/
 *.py[cod]
