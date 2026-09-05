@@ -87,6 +87,8 @@ class JobService:
             raise JobError("El trabajo no existe (¿fue eliminado?).") from None
 
     def stats(self) -> dict:
+        """Resumen monetario: el precio es "pendiente" hasta que el trabajo
+        esté en 'Realizado y Pagado'; solo entonces pasa a "facturado"."""
         total_billed = 0.0
         total_pending = 0.0
         counts = {s: 0 for s in STATE_ORDER}
@@ -95,8 +97,9 @@ class JobService:
             counts[j.state] = counts.get(j.state, 0) + 1
             if j.state == STATE_REALIZADO_PAGADO:
                 total_billed += j.subtotal()
-            elif j.state in (STATE_PENDIENTE, STATE_EN_PROGRESO):
+            else:
                 total_pending += j.subtotal()
+            if j.state in (STATE_PENDIENTE, STATE_EN_PROGRESO):
                 active += 1
         return {
             "total": len(self._jobs),

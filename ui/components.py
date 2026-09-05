@@ -121,8 +121,14 @@ def render_dashboard_tab() -> None:
 
     default_view = state_filter == "Todos" and type_filter == "Todos" and not (search or "").strip()
     if default_view:
-        pendientes = [j for j in jobs if not j.is_done]
-        completados = [j for j in jobs if j.is_done]
+        pendientes = [
+            j for j in jobs
+            if j.state not in (STATE_EN_PRODUCCION, STATE_REALIZADO_PAGADO)
+        ]
+        completados = [
+            j for j in jobs
+            if j.state in (STATE_EN_PRODUCCION, STATE_REALIZADO_PAGADO)
+        ]
         render_section("📌 Pendientes", service.group_by_client(pendientes), focus_id)
         render_section("✅ Completados", service.group_by_client(completados), focus_id)
     else:

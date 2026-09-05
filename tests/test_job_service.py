@@ -150,6 +150,28 @@ def test_regress_records_history_event(service):
     assert "← En Progreso" in row.history[-1]["detalle"]
 
 
+def test_stats_money_pending_until_realizado(service):
+    # Pendiente, Completado (Local) y En Producción: todo cuenta como "pendiente".
+    service.create_job("Cliente P1", TYPE_POR_SERVICIO, fixed_price=100)
+    job = service.create_job("Cliente P2", TYPE_POR_HORA, hourly_rate=50, hours_invested=2)
+    service.advance(job.id, STATE_EN_PROGRESO)
+    service.advance(job.id, STATE_COMPLETADO)  # 100 congelados
+    job3 = service.create_job("Cliente P3", TYPE_POR_SERVICIO, fixed_price=200)
+    service.advance(job3.id, STATE_EN_PROGRESO)
+    service.advance(job3.id, STATE_COMPLETADO)
+    service.advance(job3.id, STATE_EN_PRODUCCION)  # en producción: pendiente aún
+    billed = service.create_job("Cliente P4", TYPE_POR_SERVICIO, fixed_price=500)
+    service.advance(billed.id, STATE_EN_PROGRESO)
+    service.advance(billed.id, STATE_COMPLETADO)
+    service.advance(billed.id, STATE_EN_PRODUCCION)
+    service.advance(billed.id, STATE_REALIZADO_PAGADO)
+
+    stats = service.stats()
+    assert stats["total_billed"] == 500.0  # solo "Realizado y Pagado"
+    assert stats["total_pending"] == 400.0  # 100 + 100 + 200
+    assert stats["counts"][STATE_EN_PRODUCCION] == 1
+
+
 def test_create_job_with_backdated_creation(service):
     job = service.create_job(
         "Cliente Fecha", TYPE_POR_SERVICIO, fixed_price=80, created_at="2024-03-01"
