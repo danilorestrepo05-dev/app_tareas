@@ -100,7 +100,3 @@ pytest tests -q
 ```
 
 Cubren la máquina de estados (transiciones estrictas, congelado del subtotal), el Safe-Write, la migración de formato v1→v2, la agrupación por empresa, recordatorios/vencidos, el bloc de notas y enlaces, el parser, la exportación CSV, la retro-fecha, el espejo local↔Drive con degradación elegante y un smoke test de la UI con `AppTest` (navegación por pestañas, fechas y saltos a trabajos desde recordatorios).
-
-## 📄 Documentación del agente
-
-Ver `AGENTS.md` (gotchas y convenciones del proyecto) y `SKILLS.md` (reglas de Context7, seguridad y UI).
