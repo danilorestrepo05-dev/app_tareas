@@ -176,7 +176,18 @@ def _build_flow(redirect_uri: str):
 
 def drive_redirect_uri() -> str:
     cfg = _drive_config()
-    return cfg.get("redirect_uri") or "http://localhost:8501"
+    configured = (cfg.get("redirect_uri") or "").strip()
+    # En Community Cloud el placeholder "TOKEN.env.app.streamlit.app" se
+    # sustituye para la sección [auth], pero no en secciones propias como
+    # [drive_oauth]: si quedó sin reemplazar (o vacío), derivamos la URL
+    # base real del hostname que Streamlit Cloud expone como variable de
+    # entorno HOSTNAME.
+    if "TOKEN.env.app" in configured:
+        configured = ""
+    host = (os.environ.get("HOSTNAME") or "").strip()
+    if not configured and host and "." in host and host.lower() != "localhost":
+        return f"https://{host}"
+    return configured or "http://localhost:8501"
 
 
 def start_drive_auth(email: str) -> Optional[str]:
