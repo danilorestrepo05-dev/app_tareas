@@ -270,6 +270,27 @@ class JobService:
         self._persist()
         return job
 
+    def regress(self, job_id: str) -> Job:
+        """Vuelve un paso atrás en el flujo. Prohibido desde 'Realizado y
+        Pagado' (el trabajo está cobrado) y desde 'Pendiente' (es el inicio)."""
+        job = self.get_job(job_id)
+        if job.is_done:
+            raise JobError(
+                "Un trabajo 'Realizado y Pagado' no puede retroceder: ya está cobrado."
+            )
+        prev_state = job.prev_state()
+        if prev_state is None:
+            raise JobError(f"'{job.state}' es el estado inicial: no hay a dónde volver.")
+        previous = job.state
+        if previous == STATE_COMPLETADO:
+            # Deshacer el congelado al volver a 'En Progreso': horas editables otra vez.
+            job.frozen_subtotal = None
+            job.completed_at = None
+        job.state = prev_state
+        job.history.append(make_event("estado", f"{previous} ← {prev_state}"))
+        self._persist()
+        return job
+
     def delete_job(self, job_id: str) -> None:
         if job_id not in self._jobs:
             raise JobError("El trabajo no existe (¿fue eliminado?).")

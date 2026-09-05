@@ -121,10 +121,10 @@ def render_dashboard_tab() -> None:
 
     default_view = state_filter == "Todos" and type_filter == "Todos" and not (search or "").strip()
     if default_view:
-        activos = [j for j in jobs if j.state in (STATE_PENDIENTE, STATE_EN_PROGRESO)]
-        terminados = [j for j in jobs if j.state not in (STATE_PENDIENTE, STATE_EN_PROGRESO)]
-        render_section("📌 Pendientes y en progreso", service.group_by_client(activos), focus_id)
-        render_section("✅ Completados", service.group_by_client(terminados), focus_id)
+        pendientes = [j for j in jobs if not j.is_done]
+        completados = [j for j in jobs if j.is_done]
+        render_section("📌 Pendientes", service.group_by_client(pendientes), focus_id)
+        render_section("✅ Completados", service.group_by_client(completados), focus_id)
     else:
         render_section("Resultados", service.group_by_client(jobs), focus_id)
 
@@ -197,24 +197,62 @@ def render_job_admin(job: Job) -> None:
 
 def _render_state_control(job: Job) -> None:
     next_states = job.possible_states()
-    if not next_states:
+    prev_state = job.prev_state()
+    if not next_states and not prev_state:
         if job.state == STATE_REALIZADO_PAGADO:
             st.html('<div class="job-done">✔ Trabajo terminado y cobrado</div>')
         return
-    target = next_states[0]
-    if st.button(
-        f"▶ Avanzar a: {target}",
-        type="primary",
-        use_container_width=True,
-        key=f"adv_{job.id}",
-    ):
-        _do_advance(job, target)
+
+    forward = next_states[0] if next_states else None
+    if forward and prev_state:
+        c_adv, c_back = st.columns(2)
+        with c_adv:
+            if st.button(
+                f"▶ Avanzar a: {forward}",
+                type="primary",
+                use_container_width=True,
+                key=f"adv_{job.id}",
+            ):
+                _do_advance(job, forward)
+        with c_back:
+            if st.button(
+                f"◀ Volver a: {prev_state}",
+                type="secondary",
+                use_container_width=True,
+                key=f"back_{job.id}",
+            ):
+                _do_regress(job, prev_state)
+    elif forward:
+        if st.button(
+            f"▶ Avanzar a: {forward}",
+            type="primary",
+            use_container_width=True,
+            key=f"adv_{job.id}",
+        ):
+            _do_advance(job, forward)
+    else:
+        if st.button(
+            f"◀ Volver a: {prev_state}",
+            type="secondary",
+            use_container_width=True,
+            key=f"back_{job.id}",
+        ):
+            _do_regress(job, prev_state)
 
 
 def _do_advance(job: Job, target: str) -> None:
     try:
         service.advance(job.id, target)
         st.toast(f"'{job.client}' → {target}")
+        st.rerun()
+    except JobError as exc:
+        st.error(str(exc))
+
+
+def _do_regress(job: Job, prev_state: str) -> None:
+    try:
+        service.regress(job.id)
+        st.toast(f"'{job.client}' volvió a {prev_state}.")
         st.rerun()
     except JobError as exc:
         st.error(str(exc))

@@ -152,6 +152,16 @@ class Job:
     def possible_states(self) -> list[str]:
         return list(ALLOWED_TRANSITIONS.get(self.state, ()))
 
+    def prev_state(self) -> Optional[str]:
+        """Estado inmediatamente anterior permitido para "volver".
+
+        Prohibido desde 'Pendiente' (es el inicio) y desde 'Realizado y
+        Pagado' (el trabajo ya está cobrado)."""
+        if self.state in (STATE_PENDIENTE, STATE_REALIZADO_PAGADO):
+            return None
+        idx = STATE_ORDER.get(self.state, 0)
+        return STATE_LABELS[idx - 1] if idx > 0 else None
+
     # -- Serialización -----------------------------------------------------
     def to_dict(self) -> dict[str, Any]:
         return {

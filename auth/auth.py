@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,9 +22,60 @@ from repositories.drive import (
     DriveRepository,
     build_service,
 )
+from core.models import now_iso
 
 CRED_DIR = ".credentials"
 DEV_USER_KEY = "_dev_user"
+PENDING_PREFIX = "pending_oauth_"
+PENDING_MAX_AGE_MINUTES = 10
+
+
+def _pending_path(state: str, base_dir: str = CRED_DIR) -> str:
+    safe = hashlib.sha1(state.encode("utf-8")).hexdigest()
+    return os.path.join(base_dir, f"{PENDING_PREFIX}{safe}.json")
+
+
+def _save_pending(state: str, payload: dict, base_dir: str = CRED_DIR) -> None:
+    os.makedirs(base_dir, exist_ok=True)
+    with open(_pending_path(state, base_dir), "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False)
+
+
+def _load_pending(state: str, base_dir: str = CRED_DIR) -> Optional[dict]:
+    path = _pending_path(state, base_dir)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            return data if isinstance(data, dict) else None
+    except (ValueError, OSError):
+        return None
+
+
+def _clear_pending(state: str, base_dir: str = CRED_DIR) -> None:
+    try:
+        os.remove(_pending_path(state, base_dir))
+    except OSError:
+        pass
+
+
+def _sweep_pending(base_dir: str = CRED_DIR, max_age_minutes: int = PENDING_MAX_AGE_MINUTES) -> None:
+    """Borra flujos OAuth de Drive caducados que quedaron sin completar."""
+    try:
+        entries = os.listdir(base_dir)
+    except OSError:
+        return
+    cutoff = time.time() - max_age_minutes * 60
+    for name in entries:
+        if not name.startswith(PENDING_PREFIX):
+            continue
+        path = os.path.join(base_dir, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+        except OSError:
+            pass
 
 try:
     _LOGO_SVG = (
@@ -191,7 +243,13 @@ def drive_redirect_uri() -> str:
 
 
 def start_drive_auth(email: str) -> Optional[str]:
-    """Genera la URL de autorización de Drive. Devuelve None si falta config."""
+    """Genera la URL de autorización de Drive. Devuelve None si falta config.
+
+    El estado se persiste en disco (`.credentials/pending_oauth_*.json`) además
+    de en `session_state`: la redirección de Google es una navegación completa
+    y en Community Cloud la sesión de Streamlit puede no restaurarse, así que
+    ``complete_drive_auth`` lee el pendiente desde el archivo (con expiración).
+    """
     import streamlit as st
 
     if not _drive_config():
@@ -199,20 +257,31 @@ def start_drive_auth(email: str) -> Optional[str]:
     if not email:
         return None
     try:
+        _sweep_pending()
         redirect_uri = drive_redirect_uri()
         flow = _build_flow(redirect_uri)
         auth_url, state = flow.authorization_url(
             access_type="offline", prompt="consent", include_granted_scopes="true"
         )
-        st.session_state["_drive_oauth"] = {
+        payload = {
             "email": email,
             "state": state,
             "redirect_uri": redirect_uri,
+            "ts": now_iso(),
         }
+        st.session_state["_drive_oauth"] = payload
+        _save_pending(state, payload)
         return auth_url
     except Exception as exc:  # pragma: no cover
         st.session_state["_drive_oauth_error"] = str(exc)
         return None
+
+
+def _query_value(params, key: str) -> str:
+    value = params.get(key)
+    if isinstance(value, list):
+        return str(value[0]) if value else ""
+    return str(value or "")
 
 
 def complete_drive_auth() -> bool:
@@ -222,20 +291,32 @@ def complete_drive_auth() -> bool:
     params = st.query_params
     if "code" not in params:
         return False
-    saved = st.session_state.get("_drive_oauth")
+    state = _query_value(params, "state")
+
+    saved = _load_pending(state) if state else None
+    if saved is None:
+        saved = st.session_state.get("_drive_oauth")
     if not saved:
+        st.session_state["_drive_oauth_error"] = (
+            "El enlace de Drive expiró o no se pudo completar. Inténtalo de nuevo."
+        )
         return False
-    if params.get("state") != saved.get("state"):
+    if state and str(saved.get("state")) != state:
         st.session_state["_drive_oauth_error"] = "Estado OAuth no válido."
         return False
     try:
         redirect_uri = saved["redirect_uri"]
         callback = (
-            f"{redirect_uri}?code={params['code']}&state={params['state']}"
+            f"{redirect_uri}?code={_query_value(params, 'code')}&state={state or str(saved.get('state') or '')}"
         )
         flow = _build_flow(redirect_uri)
         flow.fetch_token(authorization_response=callback)
-        _save_token(saved["email"], flow.credentials)
+        email = saved.get("email") or ""
+        if not email:
+            raise ValueError("Falta el email del flujo OAuth de Drive.")
+        _save_token(email, flow.credentials)
+        if state:
+            _clear_pending(state)
         st.session_state.pop("_drive_oauth", None)
         st.session_state.pop("_drive_oauth_error", None)
         for key in list(params.keys()):
@@ -243,6 +324,8 @@ def complete_drive_auth() -> bool:
                 del st.query_params[key]
         return True
     except Exception as exc:  # pragma: no cover
+        if state:
+            _clear_pending(state)
         st.session_state["_drive_oauth_error"] = str(exc)
         return False
 

@@ -15,6 +15,7 @@ from core.models import (
     STATE_REALIZADO_PAGADO,
     TYPE_POR_HORA,
     TYPE_POR_SERVICIO,
+    Job,
     now_iso,
 )
 from repositories.base import empty_document
@@ -85,6 +86,68 @@ def test_update_notes_allowed_when_frozen(service):
     job = service.update_notes(job.id, "Pasos: instalar módulo x")
     assert job.notes.startswith("Pasos")
     assert job.subtotal() == 10.0  # el costo sigue congelado
+
+
+def test_prev_state_disallows_from_pending_and_done():
+    assert Job(state=STATE_EN_PROGRESO).prev_state() == STATE_PENDIENTE
+    assert Job(state=STATE_COMPLETADO).prev_state() == STATE_EN_PROGRESO
+    assert Job(state=STATE_EN_PRODUCCION).prev_state() == STATE_COMPLETADO
+    assert Job(state=STATE_PENDIENTE).prev_state() is None
+    assert Job(state=STATE_REALIZADO_PAGADO).prev_state() is None
+
+
+def test_regress_goes_one_step_back_and_unfreezes(service):
+    job = service.create_job("Cliente R1", TYPE_POR_HORA, hourly_rate=10, hours_invested=2)
+    service.advance(job.id, STATE_EN_PROGRESO)
+    service.advance(job.id, STATE_COMPLETADO)
+    job = service.get_job(job.id)
+    assert job.frozen_subtotal == 20.0
+
+    job = service.regress(job.id)
+    assert job.state == STATE_EN_PROGRESO
+    assert job.frozen_subtotal is None
+    assert job.completed_at is None
+    assert job.subtotal() == 20.0  # vivo otra vez: se pueden sumar horas
+
+    service.add_hours(job.id, 1)
+    assert service.get_job(job.id).subtotal() == 30.0
+
+
+def test_regress_from_en_produccion_back_to_completado_keeps_frozen(service):
+    job = service.create_job("Cliente R4", TYPE_POR_HORA, hourly_rate=10, hours_invested=2)
+    service.advance(job.id, STATE_EN_PROGRESO)
+    service.advance(job.id, STATE_COMPLETADO)
+    service.advance(job.id, STATE_EN_PRODUCCION)
+
+    job = service.regress(job.id)
+    assert job.state == STATE_COMPLETADO
+    assert job.frozen_subtotal == 20.0  # sigue congelado: solo se deshace al volver a En Progreso
+
+
+def test_regress_forbidden_from_done_and_pending(service):
+    job = service.create_job("Cliente R2", TYPE_POR_SERVICIO, fixed_price=100)
+    service.advance(job.id, STATE_EN_PROGRESO)
+    service.advance(job.id, STATE_COMPLETADO)
+    service.advance(job.id, STATE_EN_PRODUCCION)
+    service.advance(job.id, STATE_REALIZADO_PAGADO)
+    with pytest.raises(JobError):
+        service.regress(job.id)
+    assert service.get_job(job.id).state == STATE_REALIZADO_PAGADO
+
+    job2 = service.create_job("Cliente R3", TYPE_POR_SERVICIO, fixed_price=50)
+    with pytest.raises(JobError):
+        service.regress(job2.id)
+    assert service.get_job(job2.id).state == STATE_PENDIENTE
+
+
+def test_regress_records_history_event(service):
+    job = service.create_job("Cliente R5", TYPE_POR_SERVICIO, fixed_price=100)
+    service.advance(job.id, STATE_EN_PROGRESO)
+    service.advance(job.id, STATE_COMPLETADO)
+    service.regress(job.id)
+    row = service.get_job(job.id)
+    assert row.history[-1]["evento"] == "estado"
+    assert "← En Progreso" in row.history[-1]["detalle"]
 
 
 def test_create_job_with_backdated_creation(service):
