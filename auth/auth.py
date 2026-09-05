@@ -30,18 +30,22 @@ PENDING_PREFIX = "pending_oauth_"
 PENDING_MAX_AGE_MINUTES = 10
 
 
-def _pending_path(state: str, base_dir: str = CRED_DIR) -> str:
+def _resolve_cred_dir(base_dir: Optional[str]) -> str:
+    return base_dir or CRED_DIR
+
+
+def _pending_path(state: str, base_dir: Optional[str] = None) -> str:
     safe = hashlib.sha1(state.encode("utf-8")).hexdigest()
-    return os.path.join(base_dir, f"{PENDING_PREFIX}{safe}.json")
+    return os.path.join(_resolve_cred_dir(base_dir), f"{PENDING_PREFIX}{safe}.json")
 
 
-def _save_pending(state: str, payload: dict, base_dir: str = CRED_DIR) -> None:
-    os.makedirs(base_dir, exist_ok=True)
+def _save_pending(state: str, payload: dict, base_dir: Optional[str] = None) -> None:
+    os.makedirs(_resolve_cred_dir(base_dir), exist_ok=True)
     with open(_pending_path(state, base_dir), "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False)
 
 
-def _load_pending(state: str, base_dir: str = CRED_DIR) -> Optional[dict]:
+def _load_pending(state: str, base_dir: Optional[str] = None) -> Optional[dict]:
     path = _pending_path(state, base_dir)
     if not os.path.exists(path):
         return None
@@ -53,24 +57,26 @@ def _load_pending(state: str, base_dir: str = CRED_DIR) -> Optional[dict]:
         return None
 
 
-def _clear_pending(state: str, base_dir: str = CRED_DIR) -> None:
+def _clear_pending(state: str, base_dir: Optional[str] = None) -> None:
     try:
         os.remove(_pending_path(state, base_dir))
     except OSError:
         pass
 
 
-def _sweep_pending(base_dir: str = CRED_DIR, max_age_minutes: int = PENDING_MAX_AGE_MINUTES) -> None:
+def _sweep_pending(
+    base_dir: Optional[str] = None, max_age_minutes: int = PENDING_MAX_AGE_MINUTES
+) -> None:
     """Borra flujos OAuth de Drive caducados que quedaron sin completar."""
     try:
-        entries = os.listdir(base_dir)
+        entries = os.listdir(_resolve_cred_dir(base_dir))
     except OSError:
         return
     cutoff = time.time() - max_age_minutes * 60
     for name in entries:
         if not name.startswith(PENDING_PREFIX):
             continue
-        path = os.path.join(base_dir, name)
+        path = os.path.join(_resolve_cred_dir(base_dir), name)
         try:
             if os.path.getmtime(path) < cutoff:
                 os.remove(path)
@@ -298,7 +304,9 @@ def complete_drive_auth() -> bool:
         saved = st.session_state.get("_drive_oauth")
     if not saved:
         st.session_state["_drive_oauth_error"] = (
-            "El enlace de Drive expiró o no se pudo completar. Inténtalo de nuevo."
+            "No se encontró el flujo de Drive que empezaste (si la app se reinició "
+            "entre la autorización y el retorno, el pendiente se pierde). "
+            "Vuelve a pulsar «Conectar Google Drive»."
         )
         return False
     if state and str(saved.get("state")) != state:
