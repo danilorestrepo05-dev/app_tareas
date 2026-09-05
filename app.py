@@ -75,7 +75,6 @@ def main() -> None:
         )
         if st.button("Salir", key="btn_logout", type="secondary", use_container_width=True):
             auth_mod.logout()
-            st.rerun()
 
     if getattr(service.repo, "last_error", None):
         st.warning(service.repo.last_error)

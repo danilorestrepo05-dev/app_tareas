@@ -299,7 +299,7 @@ html {
 #return-to-top {
     position: fixed;
     inset-inline-end: 1rem;
-    bottom: 1.1rem;
+    bottom: 3.4rem;
     z-index: 999;
     display: inline-flex;
     align-items: center;
