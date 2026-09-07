@@ -17,6 +17,7 @@ st.set_page_config(
 )
 
 from auth import auth as auth_mod
+from repositories.github import GithubRepository
 from repositories.local_json import LocalJsonRepository
 from services.job_service import JobService
 from ui import components as cmp
@@ -27,9 +28,16 @@ _LOGO_SVG = (Path(__file__).resolve().parent / "assets" / "icon.svg").read_text(
 
 @st.cache_resource(show_spinner=False)
 def build_service(email: str) -> JobService:
-    """Clave de caché por email: cada usuario lee/escribe solo su archivo."""
-    path = auth_mod.data_path_for(email)
-    return JobService(LocalJsonRepository(path))
+    """Clave de caché por email: cada usuario lee/escribe solo su documento.
+
+    Si hay secrets ``[github]`` (token + repo privado), los datos se persisten
+    en GitHub vía API (sobreviven a reinicios del contenedor de Cloud); si no,
+    se usa el JSON local del contenedor.
+    """
+    repo = GithubRepository.try_build(email)
+    if repo is None:
+        repo = LocalJsonRepository(auth_mod.data_path_for(email))
+    return JobService(repo)
 
 
 def main() -> None:
@@ -39,6 +47,10 @@ def main() -> None:
     email = user["email"]
 
     service = build_service(email)
+
+    # Si el respaldo duradero no responde, avisar sin bloquear ni borrar nada.
+    if getattr(service.repo, "last_error", None):
+        st.warning(f"⚠️ {service.repo.last_error}")
 
     # Ancla de destino para el botón "volver arriba".
     st.markdown('<span id="nc-top"></span>', unsafe_allow_html=True)

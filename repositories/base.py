@@ -15,6 +15,19 @@ def empty_document() -> dict:
     return {"schema_version": 2, "jobs": [], "notes": []}
 
 
+def normalize_document(data) -> dict:
+    """Acepta listas (formato v1) o dicts; devuelve siempre el documento v2."""
+    if isinstance(data, dict):
+        return {
+            "schema_version": data.get("schema_version", 2),
+            "jobs": data.get("jobs") if isinstance(data.get("jobs"), list) else [],
+            "notes": data.get("notes") if isinstance(data.get("notes"), list) else [],
+        }
+    if isinstance(data, list):
+        return {"schema_version": 2, "jobs": data, "notes": []}
+    return empty_document()
+
+
 class BaseRepository(ABC):
     """Contrato de persistencia del documento de datos de un usuario."""
 

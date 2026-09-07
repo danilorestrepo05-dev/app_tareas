@@ -24,6 +24,7 @@ from core.models import (
 )
 from services.job_service import JobError, JobService
 from services.parser_notas import count_sections, parse
+from repositories.github import GithubRepository
 
 # Servicio activo de la sesión: app.py lo fija en cada ejecución.
 service: JobService
@@ -706,9 +707,15 @@ def render_notes_tab() -> None:
 # ---------------------------------------------------------------------------
 def render_backup_panel() -> None:
     st.subheader("📦 Respaldo y exportación")
+    if isinstance(service.repo, GithubRepository):
+        st.caption(
+            "🟢 Este dispositivo está conectado: los datos se guardan de forma "
+            "automática en tu repositorio privado de GitHub y sobreviven a "
+            "reinicios del servidor."
+        )
     st.markdown(
-        "Tus datos viven en la nube (Streamlit Community Cloud), en un archivo "
-        "propio por usuario: sobreviven a la pérdida o deterioro del teléfono. "
+        "Tus datos viven en la nube, en un archivo propio por usuario: "
+        "sobreviven a la pérdida o deterioro del teléfono. "
         "Usa las descargas para copiarlos o llevarlos a otro lugar."
     )
     st.divider()

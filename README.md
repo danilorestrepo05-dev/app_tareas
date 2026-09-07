@@ -1,8 +1,8 @@
 # NotesControl
 
-App web responsive (para el navegador del móvil) para registrar y seguir trabajos **freelance por hora o por servicio**, con login con Google. Los datos de cada usuario viven en la nube (Streamlit Community Cloud), por lo que sobreviven a la pérdida o deterioro del teléfono.
+App web responsive (para el navegador del móvil) para registrar y seguir trabajos **freelance por hora o por servicio**, con login con Google. Los datos de cada usuario se guardan de forma automática en un **repositorio privado de GitHub**, por lo que sobreviven a reinicios del servidor y a la pérdida o deterioro del teléfono.
 
-> **Nada crítico vive solo en el dispositivo**: los datos se guardan por usuario en la nube y puedes exportarlos (JSON/CSV) desde la app.
+> **Nada crítico vive solo en el dispositivo**: los datos se guardan por usuario en un repositorio privado de GitHub y puedes exportarlos (JSON/CSV) desde la app.
 
 ## ✨ Funcionalidades
 
@@ -22,11 +22,12 @@ App web responsive (para el navegador del móvil) para registrar y seguir trabaj
 - **Notas por trabajo + Bloc de notas global**: escribe apuntes y código, impórtalos desde un `.txt` o pegándolos, y **enlaza** notas del bloc a trabajos. El texto se **presenta parseado** (títulos, pasos y bloques de código).
 - **Recordatorios en tarjetas**: próximos (30 días) y vencidos, con cliente, fecha, estado y total; al tocar **"Ir al trabajo →"** te lleva a la tarjeta del trabajo en el Tablero.
 - **Exportación**: copia universal **JSON** del documento y hoja de cálculo **CSV** (compatible Excel/Sheets).
+- **Persistencia duradera**: los datos viven en un **repositorio privado de GitHub** (un archivo `data/<email>.json` por usuario, escrito vía API). Si GitHub no responde, la app sigue con una copia local en caché y **avisa** (nunca borra datos en silencio).
 - **Modo desarrollo** sin credenciales para probar localmente.
 
 ## 🧱 Arquitectura
 
-- **Patrón Repositorio**: la lógica de negocio (`services/`) nunca conoce la capa física. `repositories/` implementa `BaseRepository` con persistencia local en JSON (con *Safe-Write* / shadow-write).
+- **Patrón Repositorio**: la lógica de negocio (`services/`) nunca conoce la capa física. `repositories/` implementa `BaseRepository` con persistencia en **GitHub privado** (`repositories/github.py`, vía Contents API, con copia local en caché) y **JSON local** (`repositories/local_json.py`, con *Safe-Write* / shadow-write) como respaldo cuando no hay token configurado.
 - **Documento versionado**: el almacenamiento es un JSON único `{"schema_version": 2, "jobs": [...], "notes": [...]}`. Los repositorios **migran** formatos antiguos (lista v1) sin pérdida.
 - **Safe-Write**: los JSON se escriben primero a archivo temporal y se reemplazan atómicamente (`os.replace`), con `try/except` defensivo.
 - **Presentación derivada del texto**: las notas se guardan como texto plano y se muestran con un **parser ligero** (`services/parser_notas.py`) que reconoce títulos (`#`/`***`), pasos (→, "Ajustes → …", viñetas) y bloques de código (XML/Python indentado).
@@ -38,7 +39,7 @@ auth/                  # Login (st.login)
 core/models.py         # Job + Note + máquina de estados + evento/historial
 services/job_service.py# Reglas de negocio, agrupación, recordatorios, CSV
 services/parser_notas.py# Parser de títulos/pasos/código para presentar notas
-repositories/          # BaseRepository + JSON local (Safe-Write)
+repositories/          # BaseRepository + GitHub privado (Contents API) + JSON local
 ui/                    # Estilos responsive y componentes web
 tests/                 # Tests (pytest + AppTest de Streamlit)
 ```
@@ -77,13 +78,20 @@ cookie_secret = "cadena-aleatoria-larga"
 client_id = "...apps.googleusercontent.com"
 client_secret = "GOCSPX-..."
 server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+
+# Persistencia duradera (opcional local; obligatorio en Cloud)
+[github]
+token = "gho_..."                     # obtenlo en local: gh auth token (scope repo)
+repo = "TU-USUARIO/notascontrol-data"
 ```
+
+> ⚠️ **Token de GitHub**: el valor de `gh auth token` tiene scope `repo` y da acceso real a tu cuenta. Guárdalo solo en los Secrets de Streamlit Cloud y en tu `secrets.toml` local (ambos **no versionados**); no lo subas al repositorio. Sin `[github]`, la app usa el JSON local del contenedor (efímero).
 
 ## 🚢 Desplegar en Streamlit Community Cloud
 
 1. Sube el repositorio a GitHub.
 2. En <https://share.streamlit.io> → **Nueva app** → selecciona el repo y `app.py`.
-3. En **Settings → Secrets** pega el contenido de `secrets.toml` (rellenado; solo `[auth]`).
+3. En **Settings → Secrets** pega el contenido de `secrets.toml` (rellenado: `[auth]` **y** `[github]` con tu token de GitHub). Con `[github]` los datos se persisten en el repo privado y sobreviven a reinicios; sin él, solo se guardan en el contenedor (**efímero**, riesgo de pérdida).
 4. Cuando pida la URL del login, asegúrate de que `redirect_uri` del cliente OAuth es `https://TU-APP.streamlit.app/oauth2callback`.
 
 ## 🧪 Tests
@@ -92,4 +100,4 @@ server_metadata_url = "https://accounts.google.com/.well-known/openid-configurat
 pytest tests -q
 ```
 
-Cubren la máquina de estados (transiciones estrictas, congelado/descongelado del subtotal, volver atrás), el Safe-Write, la migración de formato v1→v2, la agrupación por empresa, las métricas de dinero (pendiente vs. facturado), recordatorios/vencidos, el bloc de notas y enlaces, el parser, la exportación CSV, la retro-fecha y un smoke test de la UI con `AppTest` (navegación por pestañas, fechas y saltos a trabajos desde recordatorios).
+Cubren la máquina de estados (transiciones estrictas, congelado/descongelado del subtotal, volver atrás), el Safe-Write, la migración de formato v1→v2, la agrupación por empresa, las métricas de dinero (pendiente vs. facturado), recordatorios/vencidos, el bloc de notas y enlaces, el parser, la exportación CSV, la retro-fecha, el repositorio GitHub (lectura/escritura vía Contents API con caché local, conflictos de sha y degradación) y un smoke test de la UI con `AppTest` (navegación por pestañas, fechas y saltos a trabajos desde recordatorios).
