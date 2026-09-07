@@ -714,11 +714,19 @@ def render_backup_panel() -> None:
             "reinicios del servidor."
         )
     else:
+        cfg = GithubRepository.config_value()
+        if cfg.get("repo"):
+            hint = (
+                f"Se detecta la configuración [github] (repo "
+                f"{cfg['repo']}), pero la app aún no la usa: pulsa "
+                "⋮ → Reboot en Streamlit Cloud para reiniciarla."
+            )
+        else:
+            hint = "No hay sección [github] en los Secrets de la app."
         st.caption(
             "🟠 Almacenamiento local temporal: los datos se guardan en este "
-            "servidor y pueden perderse al reiniciarse. Configura el token de "
-            "GitHub en los Secrets de la app (sección [github]) para "
-            "persistirlos."
+            "servidor y pueden perderse al reiniciarse. "
+            + hint
         )
     st.markdown(
         "Tus datos viven en la nube, en un archivo propio por usuario: "
