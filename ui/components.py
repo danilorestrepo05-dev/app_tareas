@@ -709,9 +709,16 @@ def render_backup_panel() -> None:
     st.subheader("📦 Respaldo y exportación")
     if isinstance(service.repo, GithubRepository):
         st.caption(
-            "🟢 Este dispositivo está conectado: los datos se guardan de forma "
+            "🟢 Respaldo duradero activo: los datos se guardan de forma "
             "automática en tu repositorio privado de GitHub y sobreviven a "
             "reinicios del servidor."
+        )
+    else:
+        st.caption(
+            "🟠 Almacenamiento local temporal: los datos se guardan en este "
+            "servidor y pueden perderse al reiniciarse. Configura el token de "
+            "GitHub en los Secrets de la app (sección [github]) para "
+            "persistirlos."
         )
     st.markdown(
         "Tus datos viven en la nube, en un archivo propio por usuario: "
