@@ -16,13 +16,29 @@ import os
 from typing import Optional
 from urllib.parse import quote
 
-import httpx
+from repositories.base import BaseRepository, empty_document
 
-from repositories.base import BaseRepository, empty_document, normalize_document
+try:
+    import httpx
+except Exception:  # pragma: no cover - httpx es dependencia de Authlib
+    httpx = None  # type: ignore
 
 _API_BASE = "https://api.github.com"
 _COMMIT_MSG = "NotesControl: actualizar datos"
 _TIMEOUT = 15.0
+
+
+def _normalize(data) -> dict:
+    """Acepta listas (formato v1) o dicts; devuelve siempre el documento v2."""
+    if isinstance(data, dict):
+        return {
+            "schema_version": data.get("schema_version", 2),
+            "jobs": data.get("jobs") if isinstance(data.get("jobs"), list) else [],
+            "notes": data.get("notes") if isinstance(data.get("notes"), list) else [],
+        }
+    if isinstance(data, list):
+        return {"schema_version": 2, "jobs": data, "notes": []}
+    return empty_document()
 
 
 def _has_data(doc: dict) -> bool:
@@ -57,7 +73,9 @@ class GithubRepository(BaseRepository):
         self.email = email
         self.path = f"data/{quote(email, safe='/@._+-')}.json"
         self._shadow = local_shadow
-        self._client = client or httpx.Client(base_url=_API_BASE, timeout=_TIMEOUT)
+        self._client = client or (httpx.Client(base_url=_API_BASE, timeout=_TIMEOUT) if httpx else None)
+        if self._client is None:  # pragma: no cover - httpx siempre instala con Authlib
+            raise RuntimeError("Falta la dependencia httpx para persistir en GitHub.")
         self._sha: Optional[str] = None
         self._dirty = False
         self.last_error: Optional[str] = None
@@ -132,7 +150,7 @@ class GithubRepository(BaseRepository):
             payload = res.json()
             self._sha = payload["sha"]
             raw = base64.b64decode(payload["content"]).decode("utf-8")
-            doc = normalize_document(json.loads(raw))
+            doc = _normalize(json.loads(raw))
         except Exception as exc:
             self.last_error = f"Respuesta inválida de GitHub; usando la copia local ({exc})."
             return self._load_shadow_or_error()
@@ -146,7 +164,7 @@ class GithubRepository(BaseRepository):
 
     def _shadow_doc(self) -> dict:
         try:
-            return normalize_document(self._shadow.load_document())
+            return _normalize(self._shadow.load_document())
         except Exception:
             return empty_document()
 
@@ -161,7 +179,7 @@ class GithubRepository(BaseRepository):
 
     # -- Escritura ----------------------------------------------------------
     def save_document(self, document: dict) -> None:
-        doc = normalize_document(document)
+        doc = _normalize(document)
         raw = json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         content_b64 = base64.b64encode(raw).decode("ascii")
 
